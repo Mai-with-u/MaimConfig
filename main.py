@@ -13,7 +13,8 @@ from src.api.routes import (
     tenant_router,
     agent_router,
     api_key_router,
-    auth_router
+    auth_router,
+    active_state_router,
 )
 from src.database.connection import init_database, close_database
 from src.database.models import create_tables
@@ -67,7 +68,7 @@ def create_app() -> FastAPI:
         docs_url="/docs",
         redoc_url="/redoc",
         openapi_url="/openapi.json",
-        lifespan=lifespan
+        lifespan=lifespan,
     )
 
     # 添加CORS中间件
@@ -84,6 +85,7 @@ def create_app() -> FastAPI:
     app.include_router(agent_router, prefix="/api/v2", tags=["Agent管理"])
     app.include_router(api_key_router, prefix="/api/v2", tags=["API密钥管理"])
     app.include_router(auth_router, prefix="/api/v2", tags=["API密钥认证"])
+    app.include_router(active_state_router, prefix="/api/v2", tags=["Agent活跃状态"])
 
     # 根路径
     @app.get("/")
@@ -106,7 +108,7 @@ def create_app() -> FastAPI:
                 "Agent配置管理",
                 "API密钥管理",
                 "API密钥认证",
-                "内部服务架构"
+                "内部服务架构",
             ],
         }
 
@@ -119,16 +121,12 @@ def create_app() -> FastAPI:
                 "status": "healthy",
                 "timestamp": time.time(),
                 "version": "1.0.0",
-                "services": {
-                    "database": "healthy",
-                    "api": "healthy"
-                },
+                "services": {"database": "healthy", "api": "healthy"},
             }
         except Exception as e:
             logger.error(f"健康检查失败: {e}")
             raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="服务不健康"
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="服务不健康"
             ) from None
 
     # API信息
@@ -142,14 +140,14 @@ def create_app() -> FastAPI:
             "architecture": {
                 "isolation_levels": ["tenant", "agent", "platform"],
                 "auth_mode": "internal_service",
-                "database": "mysql"
+                "database": "mysql",
             },
             "supported_features": [
                 "租户管理",
                 "Agent配置管理",
                 "API密钥管理",
                 "API密钥认证",
-                "多租户隔离"
+                "多租户隔离",
             ],
         }
 
@@ -168,10 +166,4 @@ if __name__ == "__main__":
     host = os.getenv("HOST", "0.0.0.0")
 
     # 开发环境配置
-    uvicorn.run(
-        "main:app",
-        host=host,
-        port=port,
-        reload=True,
-        log_level="info"
-    )
+    uvicorn.run("main:app", host=host, port=port, reload=True, log_level="info")

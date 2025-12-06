@@ -11,32 +11,46 @@ from pydantic import BaseModel
 # 导入maim_db配置管理器
 import sys
 import os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'maim_db')))
+
+sys.path.insert(
+    0,
+    os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "..", "maim_db")
+    ),
+)
 
 try:
     from maim_db.src.core import (
         Agent as AsyncAgent,
+        AsyncAgentActiveState,
         Tenant,
         AgentStatus,
         AgentConfigManager,
         init_database,
         close_database,
-        get_database
+        get_database,
     )
     from maim_db.src.core.models import AGENT_CONFIG_MODELS
+
     MAIM_DB_AVAILABLE = True
 except ImportError:
     MAIM_DB_AVAILABLE = False
-    # 创建占位符类
-    class AsyncAgent: pass
-    class Tenant: pass
-    class AgentStatus: pass
-    class AgentConfigManager: pass
 
-from src.utils.response import (
-    create_success_response,
-    create_error_response
-)
+    # 创建占位符类
+    class AsyncAgent:
+        pass
+
+    class Tenant:
+        pass
+
+    class AgentStatus:
+        pass
+
+    class AgentConfigManager:
+        pass
+
+
+from src.utils.response import create_success_response, create_error_response
 from src.common.logger import get_logger
 
 logger = get_logger(__name__)
@@ -45,6 +59,7 @@ router = APIRouter()
 
 class AgentCreateRequest(BaseModel):
     """创建Agent请求模型"""
+
     tenant_id: str
     name: str
     description: Optional[str] = None
@@ -55,6 +70,7 @@ class AgentCreateRequest(BaseModel):
 
 class AgentUpdateRequest(BaseModel):
     """更新Agent请求模型"""
+
     name: Optional[str] = None
     description: Optional[str] = None
     config: Optional[Dict[str, Any]] = None
@@ -64,6 +80,7 @@ class AgentUpdateRequest(BaseModel):
 
 class AgentResponse(BaseModel):
     """Agent响应模型"""
+
     id: str
     tenant_id: str
     name: str
@@ -78,6 +95,7 @@ class AgentResponse(BaseModel):
 
 class AgentListRequest(BaseModel):
     """Agent列表查询参数"""
+
     tenant_id: str
     page: int = 1
     page_size: int = 20
@@ -89,7 +107,9 @@ async def generate_agent_id() -> str:
     return f"agent_{uuid.uuid4().hex[:12]}"
 
 
-def agent_to_response(agent: AsyncAgent, config_manager: AgentConfigManager = None) -> AgentResponse:
+def agent_to_response(
+    agent: AsyncAgent, config_manager: AgentConfigManager = None
+) -> AgentResponse:
     """将Agent模型转换为响应模型"""
     # 获取配置
     config = None
@@ -110,7 +130,7 @@ def agent_to_response(agent: AsyncAgent, config_manager: AgentConfigManager = No
         status=agent.status,
         created_at=agent.created_at.isoformat() if agent.created_at else "",
         updated_at=agent.updated_at.isoformat() if agent.updated_at else "",
-        tags=None  # TODO: 从config中获取tags
+        tags=None,  # TODO: 从config中获取tags
     )
 
 
@@ -139,7 +159,7 @@ async def create_agent(request: AgentCreateRequest):
                 message="租户不存在",
                 error="指定的租户ID无效",
                 error_code="AGENT_001",
-                request_id=request_id
+                request_id=request_id,
             )
 
         # 检查Agent名称是否已存在（在同一租户下）
@@ -151,7 +171,7 @@ async def create_agent(request: AgentCreateRequest):
                         message="Agent名称在该租户下已存在",
                         error="Agent名称重复",
                         error_code="AGENT_002",
-                        request_id=request_id
+                        request_id=request_id,
                     )
 
         # 创建Agent
@@ -162,8 +182,16 @@ async def create_agent(request: AgentCreateRequest):
             description=request.description,
             template_id=request.template_id,
             config=request.config or {},
-            status=AgentStatus.ACTIVE.value
+            status=AgentStatus.ACTIVE.value,
         )
+
+        # 创建后标记为活跃（TTL 12 小时）
+        try:
+            await AsyncAgentActiveState.upsert(
+                request.tenant_id, agent.id, ttl_seconds=12 * 3600
+            )
+        except Exception as e:
+            logger.warning(f"标记Agent活跃失败: {e}")
 
         # 创建配置管理器并保存配置
         config_manager = AgentConfigManager(agent.id)
@@ -181,7 +209,7 @@ async def create_agent(request: AgentCreateRequest):
             data=agent_to_response(agent, config_manager),
             message="Agent创建成功",
             request_id=request_id,
-            execution_time=time.time() - start_time
+            execution_time=time.time() - start_time,
         )
 
     except Exception as e:
@@ -191,7 +219,7 @@ async def create_agent(request: AgentCreateRequest):
             error=str(e),
             error_code="AGENT_003",
             request_id=request_id,
-            execution_time=time.time() - start_time
+            execution_time=time.time() - start_time,
         )
 
 
@@ -208,7 +236,7 @@ async def get_agent(agent_id: str):
                 message="Agent不存在",
                 error="未找到指定的Agent",
                 error_code="AGENT_004",
-                request_id=request_id
+                request_id=request_id,
             )
 
         # 获取配置管理器和完整配置
@@ -218,7 +246,7 @@ async def get_agent(agent_id: str):
             data=agent_to_response(agent, config_manager),
             message="获取Agent成功",
             request_id=request_id,
-            execution_time=time.time() - start_time
+            execution_time=time.time() - start_time,
         )
 
     except Exception as e:
@@ -228,7 +256,7 @@ async def get_agent(agent_id: str):
             error=str(e),
             error_code="AGENT_005",
             request_id=request_id,
-            execution_time=time.time() - start_time
+            execution_time=time.time() - start_time,
         )
 
 
@@ -237,7 +265,7 @@ async def list_agents(
     tenant_id: str,
     page: int = Query(1, ge=1, description="页码"),
     size: int = Query(20, ge=1, le=100, description="每页数量"),
-    status: Optional[AgentStatus] = Query(None, description="Agent状态筛选")
+    status: Optional[AgentStatus] = Query(None, description="Agent状态筛选"),
 ):
     """获取Agent列表"""
     start_time = time.time()
@@ -250,7 +278,7 @@ async def list_agents(
                 message="租户不存在",
                 error="指定的租户ID无效",
                 error_code="AGENT_001",
-                request_id=request_id
+                request_id=request_id,
             )
 
         offset = (page - 1) * size
@@ -283,11 +311,11 @@ async def list_agents(
                 "total": total,
                 "page": page,
                 "size": size,
-                "pages": (total + size - 1) // size
+                "pages": (total + size - 1) // size,
             },
             message="获取Agent列表成功",
             request_id=request_id,
-            execution_time=time.time() - start_time
+            execution_time=time.time() - start_time,
         )
 
     except Exception as e:
@@ -297,15 +325,12 @@ async def list_agents(
             error=str(e),
             error_code="AGENT_006",
             request_id=request_id,
-            execution_time=time.time() - start_time
+            execution_time=time.time() - start_time,
         )
 
 
 @router.put("/agents/{agent_id}", summary="更新Agent")
-async def update_agent(
-    agent_id: str,
-    request: AgentUpdateRequest
-):
+async def update_agent(agent_id: str, request: AgentUpdateRequest):
     """更新Agent信息"""
     start_time = time.time()
     request_id = str(uuid.uuid4())
@@ -317,19 +342,19 @@ async def update_agent(
                 message="Agent不存在",
                 error="未找到指定的Agent",
                 error_code="AGENT_004",
-                request_id=request_id
+                request_id=request_id,
             )
 
         # 准备更新数据
         update_data = {}
         if request.name is not None:
-            update_data['name'] = request.name
+            update_data["name"] = request.name
         if request.description is not None:
-            update_data['description'] = request.description
+            update_data["description"] = request.description
         if request.status is not None:
-            update_data['status'] = request.status.value
+            update_data["status"] = request.status.value
         if request.config is not None:
-            update_data['config'] = request.config
+            update_data["config"] = request.config
 
         # 执行更新
         await agent.update(**update_data)
@@ -352,7 +377,7 @@ async def update_agent(
             data=agent_to_response(agent, config_manager),
             message="Agent更新成功",
             request_id=request_id,
-            execution_time=time.time() - start_time
+            execution_time=time.time() - start_time,
         )
 
     except Exception as e:
@@ -362,7 +387,7 @@ async def update_agent(
             error=str(e),
             error_code="AGENT_007",
             request_id=request_id,
-            execution_time=time.time() - start_time
+            execution_time=time.time() - start_time,
         )
 
 
@@ -379,7 +404,7 @@ async def delete_agent(agent_id: str):
                 message="Agent不存在",
                 error="未找到指定的Agent",
                 error_code="AGENT_004",
-                request_id=request_id
+                request_id=request_id,
             )
 
         # 删除配置
@@ -399,7 +424,7 @@ async def delete_agent(agent_id: str):
             data={"id": agent_id},
             message="Agent删除成功",
             request_id=request_id,
-            execution_time=time.time() - start_time
+            execution_time=time.time() - start_time,
         )
 
     except Exception as e:
@@ -409,7 +434,7 @@ async def delete_agent(agent_id: str):
             error=str(e),
             error_code="AGENT_008",
             request_id=request_id,
-            execution_time=time.time() - start_time
+            execution_time=time.time() - start_time,
         )
 
 
@@ -427,7 +452,7 @@ async def get_agent_config(agent_id: str):
                 message="Agent不存在",
                 error="未找到指定的Agent",
                 error_code="AGENT_004",
-                request_id=request_id
+                request_id=request_id,
             )
 
         # 获取完整配置
@@ -438,7 +463,7 @@ async def get_agent_config(agent_id: str):
             data=config,
             message="获取Agent配置成功",
             request_id=request_id,
-            execution_time=time.time() - start_time
+            execution_time=time.time() - start_time,
         )
 
     except Exception as e:
@@ -448,7 +473,7 @@ async def get_agent_config(agent_id: str):
             error=str(e),
             error_code="AGENT_009",
             request_id=request_id,
-            execution_time=time.time() - start_time
+            execution_time=time.time() - start_time,
         )
 
 
@@ -466,7 +491,7 @@ async def update_agent_config(agent_id: str, config_data: Dict[str, Any]):
                 message="Agent不存在",
                 error="未找到指定的Agent",
                 error_code="AGENT_004",
-                request_id=request_id
+                request_id=request_id,
             )
 
         # 更新配置
@@ -482,7 +507,7 @@ async def update_agent_config(agent_id: str, config_data: Dict[str, Any]):
             data=updated_config,
             message="Agent配置更新成功",
             request_id=request_id,
-            execution_time=time.time() - start_time
+            execution_time=time.time() - start_time,
         )
 
     except Exception as e:
@@ -492,5 +517,5 @@ async def update_agent_config(agent_id: str, config_data: Dict[str, Any]):
             error=str(e),
             error_code="AGENT_010",
             request_id=request_id,
-            execution_time=time.time() - start_time
+            execution_time=time.time() - start_time,
         )
