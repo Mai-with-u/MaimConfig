@@ -66,7 +66,8 @@ def create_error_response(
     error: str = None,
     error_code: str = None,
     tenant_id: Optional[str] = None,
-    request_id: Optional[str] = None
+    request_id: Optional[str] = None,
+    execution_time: Optional[float] = None
 ) -> ApiResponse:
     """创建错误响应"""
     return ApiResponse(
@@ -76,7 +77,8 @@ def create_error_response(
         error_code=error_code,
         timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         request_id=request_id or str(uuid.uuid4()),
-        tenant_id=tenant_id
+        tenant_id=tenant_id,
+        execution_time=execution_time
     )
 
 

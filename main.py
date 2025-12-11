@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI):
 
     try:
         # 初始化数据库连接
-        await init_database()
+        init_database()
         logger.info("数据库连接初始化完成")
 
         # 创建数据库表
@@ -51,7 +51,7 @@ async def lifespan(app: FastAPI):
     logger.info("MaiMBot API Server 正在关闭...")
     try:
         # 关闭数据库连接
-        await close_database()
+        close_database()
         logger.info("数据库连接已关闭")
     except Exception as e:
         logger.error(f"关闭数据库连接失败: {e}")

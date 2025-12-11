@@ -17,11 +17,11 @@ async def create_tables() -> None:
     try:
         from .connection import init_database
 
-        await init_database()
+        init_database()
 
         # 使用 maim_db 的模型集合确保新表创建
         try:
-            from maim_db.src.core import db_manager, ALL_MODELS
+            from maim_db.core import db_manager, ALL_MODELS
 
             db_manager.create_tables(ALL_MODELS)
             print("✅ 数据库表初始化成功（使用maim_db，包含活跃状态表）")

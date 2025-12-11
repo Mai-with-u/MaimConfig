@@ -7,12 +7,10 @@ import uuid
 import base64
 from datetime import datetime
 from typing import Optional, List
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from fastapi import APIRouter, Query, Depends
 from pydantic import BaseModel
 
-from src.database.connection import get_db
+# Remove SQLAlchemy dependencies and get_db
 from src.database.models import ApiKey, Agent, Tenant, ApiKeyStatus
 from src.utils.response import (
     create_success_response,
@@ -51,30 +49,6 @@ async def generate_api_key(tenant_id: str, agent_id: str, version: str = "v1") -
     return f"mmc_{encoded_key}"
 
 
-async def parse_api_key(api_key: str) -> Optional[dict]:
-    """解析API密钥"""
-    try:
-        if not api_key.startswith("mmc_"):
-            return None
-
-        encoded_key = api_key[4:]  # 去掉 "mmc_" 前缀
-        decoded_data = base64.b64decode(encoded_key).decode()
-        parts = decoded_data.split("_")
-
-        if len(parts) >= 4:
-            return {
-                "tenant_id": parts[0],
-                "agent_id": parts[1],
-                "random_hash": parts[2],
-                "version": parts[3],
-                "format_valid": True
-            }
-    except Exception:
-        pass
-
-    return None
-
-
 async def generate_api_key_id() -> str:
     """生成API密钥ID"""
     return f"key_{uuid.uuid4().hex[:12]}"
@@ -82,8 +56,7 @@ async def generate_api_key_id() -> str:
 
 @router.post("/api-keys", summary="创建API密钥")
 async def create_api_key(
-    request: ApiKeyCreateRequest,
-    db: AsyncSession = Depends(get_db)
+    request: ApiKeyCreateRequest
 ):
     """为指定Agent创建新的API密钥"""
     start_time = time.time()
@@ -91,10 +64,7 @@ async def create_api_key(
 
     try:
         # 验证租户是否存在
-        tenant_result = await db.execute(
-            select(Tenant).where(Tenant.id == request.tenant_id)
-        )
-        tenant = tenant_result.scalar_one_or_none()
+        tenant = await Tenant.get(request.tenant_id)
         if not tenant:
             return create_error_response(
                 message="租户不存在",
@@ -104,16 +74,8 @@ async def create_api_key(
             )
 
         # 验证Agent是否存在且属于指定租户
-        agent_result = await db.execute(
-            select(Agent).where(
-                and_(
-                    Agent.id == request.agent_id,
-                    Agent.tenant_id == request.tenant_id
-                )
-            )
-        )
-        agent = agent_result.scalar_one_or_none()
-        if not agent:
+        agent = await Agent.get(request.agent_id)
+        if not agent or agent.tenant_id != request.tenant_id:
             return create_error_response(
                 message="Agent不存在或不属于指定租户",
                 error="指定的Agent ID不存在或权限不匹配",
@@ -122,15 +84,8 @@ async def create_api_key(
             )
 
         # 检查API密钥名称是否在租户内重复
-        existing_key = await db.execute(
-            select(ApiKey).where(
-                and_(
-                    ApiKey.tenant_id == request.tenant_id,
-                    ApiKey.name == request.name
-                )
-            )
-        )
-        if existing_key.scalar_one_or_none():
+        existing_key = await ApiKey.get_by_tenant_and_name(request.tenant_id, request.name)
+        if existing_key:
             return create_error_response(
                 message="API密钥名称在租户内已存在",
                 error="API密钥名称重复",
@@ -142,7 +97,7 @@ async def create_api_key(
         api_key_value = await generate_api_key(request.tenant_id, request.agent_id)
 
         # 创建API密钥记录
-        api_key = ApiKey(
+        api_key = await ApiKey.create(
             id=await generate_api_key_id(),
             tenant_id=request.tenant_id,
             agent_id=request.agent_id,
@@ -150,13 +105,9 @@ async def create_api_key(
             description=request.description,
             api_key=api_key_value,
             permissions=request.permissions,
-            status=ApiKeyStatus.ACTIVE,
+            status=ApiKeyStatus.ACTIVE.value,
             expires_at=request.expires_at
         )
-
-        db.add(api_key)
-        await db.commit()
-        await db.refresh(api_key)
 
         execution_time = time.time() - start_time
         return create_success_response(
@@ -179,7 +130,6 @@ async def create_api_key(
         )
 
     except Exception as e:
-        await db.rollback()
         logger.error(f"创建API密钥失败: {e}")
         return create_error_response(
             message="创建API密钥失败",
@@ -195,46 +145,22 @@ async def list_api_keys(
     agent_id: Optional[str] = Query(None, description="Agent ID (可选)"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
-    status: Optional[ApiKeyStatus] = Query(None, description="密钥状态过滤"),
-    db: AsyncSession = Depends(get_db)
+    status: Optional[ApiKeyStatus] = Query(None, description="密钥状态过滤")
 ):
     """获取指定租户的API密钥列表"""
     start_time = time.time()
     request_id = str(uuid.uuid4())
 
     try:
-        # 构建查询条件
-        conditions = [ApiKey.tenant_id == tenant_id]
-        if agent_id:
-            conditions.append(ApiKey.agent_id == agent_id)
-        if status:
-            conditions.append(ApiKey.status == status)
-
-        # 查询总数
-        count_query = select(func.count(ApiKey.id)).where(and_(*conditions))
-        total_result = await db.execute(count_query)
-        total = total_result.scalar()
-
-        if total == 0:
-            pagination = calculate_pagination(page, page_size, 0)
-            return create_success_response(
-                message="获取API密钥列表成功",
-                data={
-                    "items": [],
-                    "pagination": pagination.model_dump()
-                },
-                tenant_id=tenant_id,
-                execution_time=time.time() - start_time,
-                request_id=request_id
-            )
-
-        # 查询API密钥列表
-        query = select(ApiKey).where(and_(*conditions))
-        query = query.offset((page - 1) * page_size).limit(page_size)
-        query = query.order_by(ApiKey.created_at.desc())
-
-        result = await db.execute(query)
-        api_keys = result.scalars().all()
+        # Use new list method
+        status_val = status.value if status else None
+        api_keys, total = await ApiKey.list(
+            tenant_id=tenant_id,
+            agent_id=agent_id,
+            status=status_val,
+            page=page,
+            page_size=page_size
+        )
 
         # 构建响应数据
         items = []
@@ -281,19 +207,14 @@ async def list_api_keys(
 
 @router.get("/api-keys/{api_key_id}", summary="获取API密钥详情")
 async def get_api_key(
-    api_key_id: str,
-    db: AsyncSession = Depends(get_db)
+    api_key_id: str
 ):
     """获取指定API密钥的详细信息"""
     start_time = time.time()
     request_id = str(uuid.uuid4())
 
     try:
-        # 查询API密钥
-        result = await db.execute(
-            select(ApiKey).where(ApiKey.id == api_key_id)
-        )
-        api_key = result.scalar_one_or_none()
+        api_key = await ApiKey.get(api_key_id)
 
         if not api_key:
             return create_error_response(
@@ -339,19 +260,14 @@ async def get_api_key(
 @router.put("/api-keys/{api_key_id}", summary="更新API密钥")
 async def update_api_key(
     api_key_id: str,
-    request: ApiKeyUpdateRequest,
-    db: AsyncSession = Depends(get_db)
+    request: ApiKeyUpdateRequest
 ):
     """更新API密钥的配置"""
     start_time = time.time()
     request_id = str(uuid.uuid4())
 
     try:
-        # 查询API密钥
-        result = await db.execute(
-            select(ApiKey).where(ApiKey.id == api_key_id)
-        )
-        api_key = result.scalar_one_or_none()
+        api_key = await ApiKey.get(api_key_id)
 
         if not api_key:
             return create_error_response(
@@ -363,16 +279,8 @@ async def update_api_key(
 
         # 如果更新API密钥名称，检查名称是否重复
         if request.name and request.name != api_key.name:
-            existing_key = await db.execute(
-                select(ApiKey).where(
-                    and_(
-                        ApiKey.tenant_id == api_key.tenant_id,
-                        ApiKey.name == request.name,
-                        ApiKey.id != api_key_id
-                    )
-                )
-            )
-            if existing_key.scalar_one_or_none():
+            existing_key = await ApiKey.get_by_tenant_and_name(api_key.tenant_id, request.name)
+            if existing_key and existing_key.id != api_key_id:
                 return create_error_response(
                     message="API密钥名称在租户内已存在",
                     error="API密钥名称重复",
@@ -380,17 +288,19 @@ async def update_api_key(
                     request_id=request_id
                 )
 
-        # 更新API密钥信息
+        # 准备更新数据
+        update_data = {}
         if request.name is not None:
-            api_key.name = request.name
+            update_data['name'] = request.name
         if request.description is not None:
-            api_key.description = request.description
+            update_data['description'] = request.description
         if request.permissions is not None:
-            api_key.permissions = request.permissions
+            update_data['permissions'] = request.permissions
         if request.expires_at is not None:
-            api_key.expires_at = request.expires_at
+            update_data['expires_at'] = request.expires_at
 
-        await db.commit()
+        # 执行更新
+        await api_key.update(**update_data)
 
         execution_time = time.time() - start_time
         return create_success_response(
@@ -405,114 +315,10 @@ async def update_api_key(
         )
 
     except Exception as e:
-        await db.rollback()
         logger.error(f"更新API密钥失败: {e}")
         return create_error_response(
             message="更新API密钥失败",
             error=str(e),
             error_code="KEY_UPDATE_ERROR",
-            request_id=request_id
-        )
-
-
-@router.post("/api-keys/{api_key_id}/disable", summary="禁用API密钥")
-async def disable_api_key(
-    api_key_id: str,
-    db: AsyncSession = Depends(get_db)
-):
-    """临时禁用API密钥"""
-    start_time = time.time()
-    request_id = str(uuid.uuid4())
-
-    try:
-        # 查询API密钥
-        result = await db.execute(
-            select(ApiKey).where(ApiKey.id == api_key_id)
-        )
-        api_key = result.scalar_one_or_none()
-
-        if not api_key:
-            return create_error_response(
-                message="API密钥不存在",
-                error="指定的API密钥ID不存在",
-                error_code="KEY_001",
-                request_id=request_id
-            )
-
-        # 禁用API密钥
-        api_key.status = ApiKeyStatus.DISABLED
-        await db.commit()
-
-        execution_time = time.time() - start_time
-        return create_success_response(
-            message="API密钥已禁用",
-            data={
-                "api_key_id": api_key.id,
-                "status": api_key.status,
-                "disabled_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            },
-            tenant_id=api_key.tenant_id,
-            execution_time=execution_time,
-            request_id=request_id
-        )
-
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"禁用API密钥失败: {e}")
-        return create_error_response(
-            message="禁用API密钥失败",
-            error=str(e),
-            error_code="KEY_DISABLE_ERROR",
-            request_id=request_id
-        )
-
-
-@router.delete("/api-keys/{api_key_id}", summary="删除API密钥")
-async def delete_api_key(
-    api_key_id: str,
-    db: AsyncSession = Depends(get_db)
-):
-    """永久删除API密钥（不可恢复）"""
-    start_time = time.time()
-    request_id = str(uuid.uuid4())
-
-    try:
-        # 查询API密钥
-        result = await db.execute(
-            select(ApiKey).where(ApiKey.id == api_key_id)
-        )
-        api_key = result.scalar_one_or_none()
-
-        if not api_key:
-            return create_error_response(
-                message="API密钥不存在",
-                error="指定的API密钥ID不存在",
-                error_code="KEY_001",
-                request_id=request_id
-            )
-
-        # 删除API密钥
-        await db.delete(api_key)
-        await db.commit()
-
-        execution_time = time.time() - start_time
-        return create_success_response(
-            message="API密钥删除成功",
-            data={
-                "api_key_id": api_key_id,
-                "deleted_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            },
-            tenant_id=api_key.tenant_id,
-            execution_time=execution_time,
-            request_id=request_id
-        )
-
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"删除API密钥失败: {e}")
-        return create_error_response(
-            message="删除API密钥失败",
-            error=str(e),
-            error_code="KEY_DELETE_ERROR",
             request_id=request_id
         )

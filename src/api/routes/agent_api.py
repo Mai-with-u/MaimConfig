@@ -15,22 +15,22 @@ import os
 sys.path.insert(
     0,
     os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "..", "..", "maim_db")
+        os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "maim_db", "src")
     ),
 )
 
 try:
-    from maim_db.src.core import (
-        Agent as AsyncAgent,
+    from maim_db.core import (
         AsyncAgentActiveState,
-        Tenant,
-        AgentStatus,
         AgentConfigManager,
         init_database,
         close_database,
         get_database,
     )
-    from maim_db.src.core.models import AGENT_CONFIG_MODELS
+    from maim_db.core.models import AGENT_CONFIG_MODELS
+    
+    # Import Async wrappers from local models
+    from src.database.models import Tenant, Agent as AsyncAgent, AgentStatus
 
     MAIM_DB_AVAILABLE = True
 except ImportError:

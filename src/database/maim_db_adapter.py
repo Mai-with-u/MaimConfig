@@ -16,7 +16,7 @@ if maim_db_path not in sys.path:
     sys.path.insert(0, maim_db_path)
 
 try:
-    from maim_db.src.core import (
+    from maim_db.core import (
         Tenant as MaimDbTenant,
         Agent as MaimDbAgent,
         ApiKey as MaimDbApiKey,
@@ -24,7 +24,7 @@ try:
         init_database,
         close_database
     )
-    from maim_db.src.core.models.system_v2 import (
+    from maim_db.core.models.system_v2 import (
         TenantType,
         TenantStatus,
         AgentStatus,

@@ -9,7 +9,7 @@ import json
 from typing import AsyncGenerator
 
 # 添加maim_db路径
-maim_db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'maim_db'))
+maim_db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'maim_db', 'src'))
 if maim_db_path not in sys.path:
     sys.path.insert(0, maim_db_path)
     print(f"添加maim_db路径: {maim_db_path}")
@@ -20,7 +20,8 @@ try:
     sys.path.insert(0, maim_db_path)
 
     # 直接导入需要使用的模块
-    from maim_db.src.core.models.system_v2 import (
+    # 直接导入需要使用的模块
+    from maim_db.core.models.system_v2 import (
         Tenant as MaimDbTenant,
         Agent as MaimDbAgent,
         ApiKey as MaimDbApiKey,
@@ -29,7 +30,7 @@ try:
         AgentStatus,
         ApiKeyStatus
     )
-    from maim_db.src.core import init_database, close_database, get_database
+    from maim_db.core import init_database, close_database, get_database
     from .enums import (
         TenantType as LocalTenantType,
         TenantStatus as LocalTenantStatus,
@@ -65,6 +66,10 @@ except ImportError as e:
     def get_database(): return None
 
 
+# Alias for compatibility
+get_db = get_database
+
+
 # 创建异步包装器类
 class AsyncTenant:
     @classmethod
@@ -87,7 +92,7 @@ class AsyncTenant:
                 data['id'] = kwargs['id']
 
             tenant = MaimDbTenant(**data)
-            tenant.save()
+            tenant.save(force_insert=True)
             return tenant
 
         tenant = await asyncio.get_event_loop().run_in_executor(None, _create)
@@ -204,7 +209,7 @@ class AsyncAgent:
                 data['id'] = kwargs['id']
 
             agent = MaimDbAgent(**data)
-            agent.save()
+            agent.save(force_insert=True)
             return agent
 
         agent = await asyncio.get_event_loop().run_in_executor(None, _create)
@@ -242,6 +247,15 @@ class AsyncAgent:
         agent = await asyncio.get_event_loop().run_in_executor(None, _get)
         return cls(agent) if agent else None
 
+    @classmethod
+    async def get_by_tenant(cls, tenant_id):
+        def _get_by_tenant():
+            agents = MaimDbAgent.select().where(MaimDbAgent.tenant_id == tenant_id)
+            return list(agents)
+
+        agents = await asyncio.get_event_loop().run_in_executor(None, _get_by_tenant)
+        return [cls(agent) for agent in agents]
+
 
 class AsyncApiKey:
     @classmethod
@@ -265,7 +279,7 @@ class AsyncApiKey:
                 data['id'] = kwargs['id']
 
             api_key = MaimDbApiKey(**data)
-            api_key.save()
+            api_key.save(force_insert=True)
             return api_key
 
         api_key = await asyncio.get_event_loop().run_in_executor(None, _create)
@@ -308,6 +322,85 @@ class AsyncApiKey:
         api_key = await asyncio.get_event_loop().run_in_executor(None, _get)
         return cls(api_key) if api_key else None
 
+    @classmethod
+    async def get_by_tenant_and_name(cls, tenant_id: str, name: str):
+        def _get():
+            try:
+                return MaimDbApiKey.get(
+                    (MaimDbApiKey.tenant_id == tenant_id) & (MaimDbApiKey.name == name)
+                )
+            except MaimDbApiKey.DoesNotExist:
+                return None
+        
+        api_key = await asyncio.get_event_loop().run_in_executor(None, _get)
+        return cls(api_key) if api_key else None
+
+    @classmethod
+    async def list(cls, tenant_id: str, agent_id: str = None, status: str = None, page: int = 1, page_size: int = 20):
+        def _list():
+            query = MaimDbApiKey.select().where(MaimDbApiKey.tenant_id == tenant_id)
+            if agent_id:
+                query = query.where(MaimDbApiKey.agent_id == agent_id)
+            if status:
+                query = query.where(MaimDbApiKey.status == status)
+            
+            # Count total
+            total = query.count()
+            
+            # Pagination
+            query = query.order_by(MaimDbApiKey.created_at.desc())
+            query = query.offset((page - 1) * page_size).limit(page_size)
+            
+            return list(query), total
+
+        result = await asyncio.get_event_loop().run_in_executor(None, _list)
+        keys, total = result
+        return [cls(k) for k in keys], total
+
+    async def update(self, **kwargs):
+        def _update():
+            for field, value in kwargs.items():
+                if hasattr(self._api_key, field):
+                    if field == 'permissions' and value is not None:
+                        value = json.dumps(value)
+                    setattr(self._api_key, field, value)
+            self._api_key.save()
+            return self._api_key
+
+        await asyncio.get_event_loop().run_in_executor(None, _update)
+
+        # Update local attributes
+        for field, value in kwargs.items():
+            if hasattr(self, field):
+                if field == 'permissions':
+                    value = self._parse_json(json.dumps(value)) if value else []
+                setattr(self, field, value)
+
+        return self
+
+    @classmethod
+    async def get_by_key_value(cls, api_key: str, tenant_id: str = None, agent_id: str = None):
+        def _get():
+            try:
+                query = (MaimDbApiKey.api_key == api_key)
+                if tenant_id:
+                    query &= (MaimDbApiKey.tenant_id == tenant_id)
+                if agent_id:
+                    query &= (MaimDbApiKey.agent_id == agent_id)
+                
+                return MaimDbApiKey.get(query)
+            except MaimDbApiKey.DoesNotExist:
+                return None
+        
+        api_key_obj = await asyncio.get_event_loop().run_in_executor(None, _get)
+        return cls(api_key_obj) if api_key_obj else None
+
+    async def delete(self):
+        def _delete():
+            self._api_key.delete_instance()
+
+        await asyncio.get_event_loop().run_in_executor(None, _delete)
+
 
 # 导出本地枚举（用于Pydantic）
 TenantType = LocalTenantType
@@ -320,5 +413,5 @@ ApiKeyStatus = LocalApiKeyStatus
 __all__ = [
     'AsyncTenant', 'AsyncAgent', 'AsyncApiKey',
     'TenantType', 'TenantStatus', 'AgentStatus', 'ApiKeyStatus',
-    'init_database', 'close_database', 'get_database'
+    'init_database', 'close_database', 'get_database', 'get_db'
 ]

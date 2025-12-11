@@ -6,12 +6,11 @@ import time
 import uuid
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
+from fastapi import APIRouter
 from pydantic import BaseModel
 
-from src.database.connection import get_db
+# Remove SQLAlchemy dependencies and get_db
+# from src.database.connection import get_db
 from src.database.models import ApiKey, ApiKeyStatus
 from src.utils.response import create_success_response, create_error_response
 from src.common.logger import get_logger
@@ -66,8 +65,7 @@ async def parse_api_key(api_key: str) -> Optional[dict]:
 
 @router.post("/auth/parse-api-key", summary="解析API密钥")
 async def parse_api_key_endpoint(
-    request: ApiKeyParseRequest,
-    db: AsyncSession = Depends(get_db)
+    request: ApiKeyParseRequest
 ):
     """解析API密钥获取租户和Agent信息"""
     start_time = time.time()
@@ -104,8 +102,7 @@ async def parse_api_key_endpoint(
 
 @router.post("/auth/validate-api-key", summary="验证API密钥")
 async def validate_api_key(
-    request: ApiKeyValidateRequest,
-    db: AsyncSession = Depends(get_db)
+    request: ApiKeyValidateRequest
 ):
     """验证API密钥的有效性和权限"""
     start_time = time.time()
@@ -124,16 +121,12 @@ async def validate_api_key(
             )
 
         # 查询API密钥
-        result = await db.execute(
-            select(ApiKey).where(
-                and_(
-                    ApiKey.api_key == request.api_key,
-                    ApiKey.tenant_id == parsed_info["tenant_id"],
-                    ApiKey.agent_id == parsed_info["agent_id"]
-                )
-            )
+        # 使用 AsyncApiKey wrapper
+        api_key = await ApiKey.get_by_key_value(
+            api_key=request.api_key,
+            tenant_id=parsed_info["tenant_id"],
+            agent_id=parsed_info["agent_id"]
         )
-        api_key = result.scalar_one_or_none()
 
         if not api_key:
             return create_error_response(
@@ -144,7 +137,7 @@ async def validate_api_key(
             )
 
         # 检查API密钥状态
-        if api_key.status == ApiKeyStatus.DISABLED:
+        if api_key.status == ApiKeyStatus.DISABLED.value: # ApiKeyStatus enum value check
             return create_error_response(
                 message="API密钥已禁用",
                 error="API密钥已被禁用",
@@ -152,7 +145,7 @@ async def validate_api_key(
                 request_id=request_id
             )
 
-        if api_key.status == ApiKeyStatus.EXPIRED:
+        if api_key.status == ApiKeyStatus.EXPIRED.value:
             return create_error_response(
                 message="API密钥已过期",
                 error="API密钥已过期",
@@ -163,8 +156,7 @@ async def validate_api_key(
         # 检查过期时间
         if api_key.expires_at and api_key.expires_at < datetime.utcnow():
             # 更新状态为已过期
-            api_key.status = ApiKeyStatus.EXPIRED
-            await db.commit()
+            await api_key.update(status=ApiKeyStatus.EXPIRED.value)
 
             return create_error_response(
                 message="API密钥已过期",
@@ -180,9 +172,10 @@ async def validate_api_key(
 
         # 更新使用统计
         if request.check_rate_limit:
-            api_key.last_used_at = datetime.utcnow()
-            api_key.usage_count += 1
-            await db.commit()
+            await api_key.update(
+                last_used_at=datetime.utcnow(),
+                usage_count=api_key.usage_count + 1
+            )
 
         execution_time = time.time() - start_time
         return create_success_response(
@@ -202,7 +195,6 @@ async def validate_api_key(
         )
 
     except Exception as e:
-        await db.rollback()
         logger.error(f"验证API密钥失败: {e}")
         return create_error_response(
             message="验证API密钥失败",
@@ -214,8 +206,7 @@ async def validate_api_key(
 
 @router.post("/auth/check-permission", summary="检查权限")
 async def check_permission(
-    request: ApiKeyPermissionRequest,
-    db: AsyncSession = Depends(get_db)
+    request: ApiKeyPermissionRequest
 ):
     """检查API密钥是否具有指定权限"""
     start_time = time.time()
@@ -234,16 +225,11 @@ async def check_permission(
             )
 
         # 查询API密钥
-        result = await db.execute(
-            select(ApiKey).where(
-                and_(
-                    ApiKey.api_key == request.api_key,
-                    ApiKey.tenant_id == parsed_info["tenant_id"],
-                    ApiKey.agent_id == parsed_info["agent_id"]
-                )
-            )
+        api_key = await ApiKey.get_by_key_value(
+            api_key=request.api_key,
+            tenant_id=parsed_info["tenant_id"],
+            agent_id=parsed_info["agent_id"]
         )
-        api_key = result.scalar_one_or_none()
 
         if not api_key:
             return create_error_response(
@@ -254,11 +240,12 @@ async def check_permission(
             )
 
         # 检查API密钥状态
-        if api_key.status != ApiKeyStatus.ACTIVE:
-            status_text = {
-                ApiKeyStatus.DISABLED: "已禁用",
-                ApiKeyStatus.EXPIRED: "已过期"
-            }.get(api_key.status, "状态异常")
+        if api_key.status != ApiKeyStatus.ACTIVE.value:
+            status_text = "状态异常"
+            if api_key.status == ApiKeyStatus.DISABLED.value:
+                status_text = "已禁用"
+            elif api_key.status == ApiKeyStatus.EXPIRED.value:
+                status_text = "已过期"
 
             return create_error_response(
                 message="API密钥不可用",

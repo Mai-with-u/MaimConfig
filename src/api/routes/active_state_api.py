@@ -20,7 +20,7 @@ sys.path.insert(
 )
 
 try:
-    from maim_db.src.core import (
+    from maim_db.core import (
         AsyncAgentActiveState,
         AsyncAgent,
         AsyncTenant,
