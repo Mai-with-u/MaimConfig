@@ -1,140 +1,77 @@
-# MaiMBot API Server
+# MaimConfig（MaiMBot 控制平面）
 
-独立的后端API服务，提供多租户AI聊天机器人配置和管理功能。
+快速跳转：
+- [API 文档](./docs/API文档.md)
+- [设计指导](./docs/设计指导.md)
+- [Agent 配置参考](./docs/Agent配置字段完整说明.md)
+- [项目总结](./docs/项目总结.md)
 
-## 功能特性
+独立的 FastAPI 服务，负责多租户的租户/Agent/API 密钥管理，以及 Agent 活跃心跳上报。默认作为内网服务部署，接口无需鉴权，依赖网络层隔离。
 
-- 🏢 **多租户管理** - 支持个人和企业级租户，完全数据隔离
-- 🤖 **Agent配置** - 灵活的AI Agent配置和模板管理
-- 🔐 **API密钥管理** - 安全的API密钥生成、管理和权限控制
-- 🔑 **API密钥认证** - 完整的API密钥解析、验证和权限检查
-- 📊 **监控统计** - 完整的使用统计和性能监控
-- 🚀 **内部服务架构** - 无需认证，通过网络层面控制访问
+## 功能概览
+- 租户管理：创建/查询/更新/删除租户。
+- Agent 管理：创建/查询/更新/删除 Agent，并写入 maim_db 的 AgentConfig；创建时自动上报活跃 TTL（12h）。
+- API 密钥管理：生成/查询/更新 API Key，格式 `mmc_{base64(tenant_agent_random_version)}`。
+- API Key 认证：解析、验证、检查权限并记录使用统计。
+- Agent 活跃状态：上报/查询租户-Agent 的活跃 TTL。
+- 插件配置（实验特性）：/api/v1/plugins/settings 读写插件设置，依赖 maim_db 的 maimconfig_models（SQLAlchemy）。
+- 运维接口：`/health`、`/info`、根路径服务描述。
 
-## 技术栈
-
-- **Web框架**: FastAPI
-- **数据库**: MySQL 8.0
-- **ORM**: SQLAlchemy 2.0 (异步)
-- **缓存**: Redis
-- **部署**: Docker + Docker Compose
+## 运行要求
+- Python 3.10+
+- 依赖项目：`maim_db`（Peewee 模型 + AgentConfig 管理器）；可选 `maim_db.maimconfig_models`（插件配置用 SQLAlchemy）。
+- 数据库：MySQL（由 maim_db 配置）；Redis 未在本项目直接使用。
 
 ## 快速开始
-
-### 1. 环境准备
-
 ```bash
-# 克隆项目
-git clone <repository-url>
-cd api-backend
-
-# 复制环境配置
-cp .env.example .env
-```
-
-### 2. 使用Docker Compose启动
-
-```bash
-# 启动所有服务
-docker-compose up -d
-
-# 查看服务状态
-docker-compose ps
-
-# 查看日志
-docker-compose logs -f api
-```
-
-### 3. 本地开发
-
-```bash
-# 安装依赖
 pip install -r requirements.txt
-
-# 启动服务
+export PYTHONPATH="$(pwd)"  # 确保可导入 maim_db
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-## API文档
+启动时会：
+1) 初始化 maim_db 数据库连接；2) 调用 `maim_db.core.db_manager.create_tables(ALL_MODELS)` 以创建表（包含 `agent_active_states`）。
 
-启动服务后，访问以下地址查看API文档：
+## 主要端点（前缀 `/api/v2`，插件为 `/api/v1`）
+- 租户：`POST /tenants`，`GET /tenants/{id}`，`GET /tenants`（分页），`PUT /tenants/{id}`，`DELETE /tenants/{id}`
+- Agent：`POST /agents`，`GET /agents/{id}`，`GET /agents?tenant_id=...`，`PUT /agents/{id}`，`DELETE /agents/{id}`
+- API Key：`POST /api-keys`，`GET /api-keys`，`GET /api-keys/{id}`，`PUT /api-keys/{id}`
+- Auth：`POST /auth/parse-api-key`，`POST /auth/validate-api-key`，`POST /auth/check-permission`
+- 活跃状态：`PUT /agent-activity`，`GET /agent-activity`
+- 插件（实验）：`GET /api/v1/plugins/settings`，`POST /api/v1/plugins/settings`
+- 运维：`GET /health`，`GET /info`，`GET /`
 
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
-- OpenAPI JSON: http://localhost:8000/openapi.json
+## 配置与依赖
+- 数据库连接由 maim_db 提供（Peewee）；本项目的 `src/database/connection.py` 仅做异步包装。
+- Agent 配置读取/写入通过 `maim_db.core.AgentConfigManager`；存储在 maim_db 的配置目录/表中。
+- 插件接口依赖 `maim_db.maimconfig_models`（SQLAlchemy）。如未安装该子模块，插件接口将不可用。
 
-## API接口
-
-### 租户管理
-- `POST /api/v2/tenants` - 创建租户
-- `GET /api/v2/tenants/{tenant_id}` - 获取租户详情
-- `PUT /api/v2/tenants/{tenant_id}` - 更新租户
-- `DELETE /api/v2/tenants/{tenant_id}` - 删除租户
-
-### Agent管理
-- `POST /api/v2/agents` - 创建Agent
-- `GET /api/v2/agents` - 获取Agent列表
-- `GET /api/v2/agents/{agent_id}` - 获取Agent详情
-- `PUT /api/v2/agents/{agent_id}` - 更新Agent
-- `DELETE /api/v2/agents/{agent_id}` - 删除Agent
-
-### API密钥管理
-- `POST /api/v2/api-keys` - 创建API密钥
-- `GET /api/v2/api-keys` - 获取API密钥列表
-- `GET /api/v2/api-keys/{api_key_id}` - 获取API密钥详情
-- `PUT /api/v2/api-keys/{api_key_id}` - 更新API密钥
-- `POST /api/v2/api-keys/{api_key_id}/disable` - 禁用API密钥
-- `DELETE /api/v2/api-keys/{api_key_id}` - 删除API密钥
-
-### API密钥认证
-- `POST /api/v2/auth/parse-api-key` - 解析API密钥
-- `POST /api/v2/auth/validate-api-key` - 验证API密钥
-- `POST /api/v2/auth/check-permission` - 检查权限
-
-
-## 使用示例
-
-### 创建租户
-
-```bash
-curl -X POST "http://localhost:8000/api/v2/tenants" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "tenant_name": "我的公司",
-    "tenant_type": "enterprise",
-    "description": "AI聊天服务提供商",
-    "contact_email": "admin@company.com"
-  }'
+## 目录结构（节选）
+```
+MaimConfig/
+├── main.py                  # FastAPI 入口，注册路由与生命周期
+├── src/
+│   ├── api/routes/          # 路由：tenant / agent / api_key / auth / active_state / plugin
+│   ├── database/            # maim_db 异步封装与枚举
+│   ├── common/logger.py     # 日志
+│   └── utils/response.py    # 统一响应格式
+├── docs/                    # 文档（API、设计、总结、Agent 字段说明）
+└── requirements.txt
 ```
 
-### 创建Agent
+## 开发与测试
+- 直接使用 `pytest` 或脚本 `test_api.py`（如有）运行集成测试；目前仓库未内置单元测试。 
+- 本服务默认“无鉴权”，部署时务必通过网络/Ingress/防火墙限制访问。
 
-```bash
-curl -X POST "http://localhost:8000/api/v2/agents" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "tenant_id": "tenant_xyz789",
-    "name": "客服助手",
-    "description": "专业的客户服务AI助手",
-    "config": {
-      "persona": "友好、专业的客服助手",
-      "tags": ["客服", "技术支持"]
-    }
-  }'
-```
+## 迁移与兼容提示
+- 新增的 `agent_active_states` 表需在目标数据库执行创建；启动时会尝试自动创建，但生产环境建议先运行迁移脚本。
+- 代码使用 `maim_db` 的 Peewee 模型；旧文档中提到的 SQLAlchemy/Redis 聊天接口已不在当前代码中实现。
 
-### 创建API密钥
-
-```bash
-curl -X POST "http://localhost:8000/api/v2/api-keys" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "tenant_id": "tenant_xyz789",
-    "agent_id": "agent_pqr345",
-    "name": "生产环境密钥",
-    "permissions": ["chat"]
-  }'
-```
+## 参考文档
+- `docs/API文档.md`：端点与示例
+- `docs/Agent配置字段完整说明.md`：Agent 配置存储结构
+- `docs/设计指导.md`：架构与隔离要点
+- `docs/项目总结.md`：功能完成度与待办
 
 ### 使用API密钥
 

@@ -1,3 +1,133 @@
+# MaimConfig API 文档（对齐当前代码）
+
+**基础 URL**：`http://<host>:8000`
+
+**版本前缀**：`/api/v2`（插件配置为 `/api/v1/plugins`）
+
+**认证**：内部服务，无鉴权；请用网络/Ingress 限制访问。
+
+**依赖**：`maim_db`（Peewee 模型 + AgentConfig 管理器）；插件接口依赖 `maim_db.maimconfig_models`（SQLAlchemy，未安装则不可用）。
+
+## 响应格式
+成功：
+```json
+{
+  "success": true,
+  "message": "...",
+  "data": {...},
+  "request_id": "<uuid>",
+  "execution_time": 0.12
+}
+```
+
+失败：
+```json
+{
+  "success": false,
+  "message": "错误提示",
+  "error": "详细错误",
+  "error_code": "XXX",
+  "request_id": "<uuid>"
+}
+```
+
+分页（部分接口）：`data.items` + `data.pagination`（page/page_size/total/total_pages/has_next/has_prev）。
+
+枚举：
+- TenantType: `personal` / `enterprise`
+- TenantStatus: `active` / `inactive` / `suspended`
+- AgentStatus: `active` / `inactive` / `archived`
+- ApiKeyStatus: `active` / `disabled` / `expired`
+
+## 1. 租户管理（/api/v2）
+- **POST /tenants** 创建租户
+  - body: `{ tenant_name, tenant_type, description?, contact_email?, tenant_config? }`
+- **GET /tenants/{tenant_id}** 租户详情
+- **GET /tenants?page&size** 租户列表（分页）
+- **PUT /tenants/{tenant_id}** 更新租户
+  - body 可选字段：`tenant_name/description/contact_email/tenant_config/status`
+- **DELETE /tenants/{tenant_id}** 删除租户
+
+说明：名称去重在服务侧检查；`tenant_config` 以 JSON 存储。
+
+## 2. Agent 管理（/api/v2）
+- **POST /agents** 创建 Agent
+  - body: `{ tenant_id, name, description?, template_id?, config?, tags? }`
+  - 行为：创建成功后调用 `AsyncAgentActiveState.upsert`，默认 TTL 12h。
+- **GET /agents/{agent_id}** Agent 详情（含配置）
+- **GET /agents?tenant_id=...&page&size&status** Agent 列表（必填 `tenant_id`，内存分页）
+- **PUT /agents/{agent_id}** 更新 Agent
+  - body 可选字段：`name/description/config/status/tags`
+- **DELETE /agents/{agent_id}** 删除 Agent
+
+说明：配置读写通过 `maim_db.core.AgentConfigManager`，存储格式由 maim_db 决定；本服务不校验配置结构。
+
+## 3. API 密钥管理（/api/v2）
+- **POST /api-keys** 生成 API Key
+  - body: `{ tenant_id, agent_id, name, description?, permissions[], expires_at? }`
+  - 生成格式：`mmc_{base64(tenant_id_agent_id_random_version)}`
+- **GET /api-keys?tenant_id=...&agent_id?&status?&page&page_size** 列表
+- **GET /api-keys/{api_key_id}** 详情
+- **PUT /api-keys/{api_key_id}** 更新（名称/描述/权限/过期时间）
+
+说明：名称在租户内唯一；未实现禁用/删除端点（可用 `status` 与 `expires_at` 管控）。
+
+## 4. API Key 认证（/api/v2）
+- **POST /auth/parse-api-key**
+  - body: `{ api_key }` → 解析租户/Agent/版本，校验前缀 `mmc_`
+- **POST /auth/validate-api-key**
+  - body: `{ api_key, required_permission?, check_rate_limit?=true }`
+  - 行为：检查格式 → 查询 key → 校验状态/过期 → 可选权限检查 → 若 `check_rate_limit` 为真则自增 `usage_count`、更新 `last_used_at`
+- **POST /auth/check-permission**
+  - body: `{ api_key, permission }` → 返回是否拥有该权限（不自增计数）
+
+## 5. Agent 活跃状态（/api/v2）
+- **PUT /agent-activity**
+  - body: `{ tenant_id, agent_id, ttl_seconds>0 }`
+  - 行为：校验租户/Agent 存在且激活，调用 `AsyncAgentActiveState.upsert`
+- **GET /agent-activity?tenant_id?**
+  - 返回仍未过期的租户-Agent 对列表
+
+## 6. 插件配置（实验，/api/v1/plugins）
+- **GET /plugins/settings?tenant_id=...&agent_id?**
+  - 读取插件配置；若带 agent_id，返回该 Agent 特定配置 + Tenant 默认配置的合并结果（Agent 优先）。
+- **POST /plugins/settings?tenant_id=...&agent_id?**
+  - body: `{ plugin_name, enabled, config }`，写入或更新对应记录。
+
+说明：依赖 `maim_db.maimconfig_models.PluginSettings`（SQLAlchemy）。若 maim_db 未提供该模型或 `get_db` 无法返回 AsyncSession，则接口不可用。
+
+## 7. 运维接口
+- **GET /** 服务自描述（版本、主要资源路径）
+- **GET /health** 健康检查（数据库状态字段恒为占位值）
+- **GET /info** 服务信息（名称/版本/支持特性）
+
+## 示例：创建租户与 Agent，再生成 API Key
+```bash
+# 创建租户
+curl -X POST http://localhost:8000/api/v2/tenants \
+  -H "Content-Type: application/json" \
+  -d '{"tenant_name":"demo","tenant_type":"enterprise"}'
+
+# 创建 Agent
+curl -X POST http://localhost:8000/api/v2/agents \
+  -H "Content-Type: application/json" \
+  -d '{"tenant_id":"<tenant_id>","name":"assistant","config":{}}'
+
+# 生成 API Key
+curl -X POST http://localhost:8000/api/v2/api-keys \
+  -H "Content-Type: application/json" \
+  -d '{"tenant_id":"<tenant_id>","agent_id":"<agent_id>","name":"prod","permissions":["chat"]}'
+
+# 验证 API Key
+curl -X POST http://localhost:8000/api/v2/auth/validate-api-key \
+  -H "Content-Type: application/json" \
+  -d '{"api_key":"<mmc_key>","required_permission":"chat"}'
+
+# 上报活跃 TTL
+curl -X PUT http://localhost:8000/api/v2/agent-activity \
+  -H "Content-Type: application/json" \
+  -d '{"tenant_id":"<tenant_id>","agent_id":"<agent_id>","ttl_seconds":43200}'
+```
 # MaiMBot API 接口文档
 
 ## 概述
