@@ -5,6 +5,10 @@ MaiMBot API Server 主入口文件
 
 import time
 import os
+from dotenv import load_dotenv
+load_dotenv()
+print(f"DEBUG MAIMCONFIG DB URL: {os.getenv('DATABASE_URL')}", flush=True)
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
