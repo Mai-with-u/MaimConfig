@@ -322,3 +322,46 @@ async def update_api_key(
             error_code="KEY_UPDATE_ERROR",
             request_id=request_id
         )
+
+
+@router.delete("/api-keys/{api_key_id}", summary="删除API密钥")
+async def delete_api_key(
+    api_key_id: str
+):
+    """删除API密钥"""
+    start_time = time.time()
+    request_id = str(uuid.uuid4())
+
+    try:
+        api_key = await ApiKey.get(api_key_id)
+
+        if not api_key:
+            return create_error_response(
+                message="API密钥不存在",
+                error="指定的API密钥ID不存在",
+                error_code="KEY_001",
+                request_id=request_id
+            )
+
+        # 删除API密钥
+        await api_key.delete()
+
+        execution_time = time.time() - start_time
+        return create_success_response(
+            message="API密钥删除成功",
+            data={
+                "api_key_id": api_key_id
+            },
+            tenant_id=api_key.tenant_id,
+            execution_time=execution_time,
+            request_id=request_id
+        )
+
+    except Exception as e:
+        logger.error(f"删除API密钥失败: {e}")
+        return create_error_response(
+            message="删除API密钥失败",
+            error=str(e),
+            error_code="KEY_DELETE_ERROR",
+            request_id=request_id
+        )

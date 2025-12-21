@@ -30,7 +30,7 @@ try:
         AgentStatus,
         ApiKeyStatus
     )
-    from maim_db.core import init_database, close_database, get_database
+    from maim_db.core import init_database, close_database, get_database, AsyncAgentActiveState
     from .enums import (
         TenantType as LocalTenantType,
         TenantStatus as LocalTenantStatus,
@@ -59,7 +59,13 @@ except ImportError as e:
     class LocalTenantType: pass
     class LocalTenantStatus: pass
     class LocalAgentStatus: pass
+    class LocalAgentStatus: pass
     class LocalApiKeyStatus: pass
+
+    class LocalAgentStatus: pass
+    class LocalApiKeyStatus: pass
+
+    class AsyncAgentActiveState: pass
 
     async def init_database(): pass
     async def close_database(): pass
@@ -256,6 +262,12 @@ class AsyncAgent:
         agents = await asyncio.get_event_loop().run_in_executor(None, _get_by_tenant)
         return [cls(agent) for agent in agents]
 
+    async def delete(self):
+        def _delete():
+            self._agent.delete_instance()
+
+        await asyncio.get_event_loop().run_in_executor(None, _delete)
+
 
 class AsyncApiKey:
     @classmethod
@@ -411,7 +423,16 @@ ApiKeyStatus = LocalApiKeyStatus
 
 # 导出maim_db的异步模型和函数
 __all__ = [
-    'AsyncTenant', 'AsyncAgent', 'AsyncApiKey',
-    'TenantType', 'TenantStatus', 'AgentStatus', 'ApiKeyStatus',
-    'init_database', 'close_database', 'get_database', 'get_db'
+    'AsyncTenant',
+    'AsyncAgent',
+    'AsyncApiKey', 
+    'AsyncAgentActiveState',
+    'TenantType', 
+    'TenantStatus', 
+    'AgentStatus', 
+    'ApiKeyStatus',
+    'init_database',
+    'close_database', 
+    'get_database', 
+    'get_db'
 ]

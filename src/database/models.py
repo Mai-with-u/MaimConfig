@@ -6,6 +6,8 @@ from .connection import (
     AsyncTenant as Tenant,
     AsyncAgent as Agent,
     AsyncApiKey as ApiKey,
+    AsyncApiKey as ApiKey,
+    AsyncAgentActiveState as AgentActiveState,
     init_database,
 )
 from .enums import TenantType, TenantStatus, AgentStatus, ApiKeyStatus
@@ -44,5 +46,8 @@ __all__ = [
     "TenantStatus",
     "AgentStatus",
     "ApiKeyStatus",
+    "AgentStatus",
+    "ApiKeyStatus",
     "create_tables",
+    "AgentActiveState",
 ]

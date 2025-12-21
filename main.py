@@ -20,6 +20,7 @@ from src.api.routes import (
     auth_router,
     active_state_router,
     plugin_router,
+    usage_router,
 )
 from src.database.connection import init_database, close_database
 from src.database.models import create_tables
@@ -92,6 +93,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router, prefix="/api/v2", tags=["API密钥认证"])
     app.include_router(active_state_router, prefix="/api/v2", tags=["Agent活跃状态"])
     app.include_router(plugin_router, prefix="/api/v1", tags=["插件配置管理"])
+    app.include_router(usage_router, prefix="/api/v1", tags=["使用日志"])
 
     # 根路径
     @app.get("/")

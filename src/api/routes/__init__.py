@@ -9,6 +9,7 @@ from .auth_api import router as auth_router
 from .auth_api import router as auth_router
 from .active_state_api import router as active_state_router
 from .plugin_api import router as plugin_router
+from .usage_api import router as usage_router
 
 __all__ = [
     "tenant_router",
@@ -17,4 +18,5 @@ __all__ = [
     "auth_router",
     "active_state_router",
     "plugin_router",
+    "usage_router",
 ]

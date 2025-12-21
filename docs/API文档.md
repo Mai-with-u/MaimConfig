@@ -70,7 +70,7 @@
 - **GET /api-keys/{api_key_id}** 详情
 - **PUT /api-keys/{api_key_id}** 更新（名称/描述/权限/过期时间）
 
-说明：名称在租户内唯一；未实现禁用/删除端点（可用 `status` 与 `expires_at` 管控）。
+说明：名称在租户内唯一；可用 `status` 与 `expires_at` 管控，也支持物理删除。
 
 ## 4. API Key 认证（/api/v2）
 - **POST /auth/parse-api-key**
@@ -88,6 +88,11 @@
 - **GET /agent-activity?tenant_id?**
   - 返回仍未过期的租户-Agent 对列表
 
+## 6. 使用日志（/api/v1，注意版本）
+- **POST /usage/log** 记录使用日志
+  - body: `{ tenant_id?, agent_id?, user_id?, action, details?, timestamp? }`
+  - 响应: `{ success: true, data: { ...recorded_entry } }`
+
 ## 6. 插件配置（实验，/api/v1/plugins）
 - **GET /plugins/settings?tenant_id=...&agent_id?**
   - 读取插件配置；若带 agent_id，返回该 Agent 特定配置 + Tenant 默认配置的合并结果（Agent 优先）。
@@ -98,8 +103,10 @@
 
 ## 7. 运维接口
 - **GET /** 服务自描述（版本、主要资源路径）
-- **GET /health** 健康检查（数据库状态字段恒为占位值）
-- **GET /info** 服务信息（名称/版本/支持特性）
+- **GET /health** 健康检查
+  - 响应: `{"status": "healthy", "services": {"database": "healthy", "api": "healthy"}, ...}`
+- **GET /info** 服务信息
+  - 响应: `{"name": "MaiMBot API", "version": "1.0.0", "supported_features": [...], ...}`
 
 ## 示例：创建租户与 Agent，再生成 API Key
 ```bash
