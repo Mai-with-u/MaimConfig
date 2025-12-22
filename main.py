@@ -174,4 +174,4 @@ if __name__ == "__main__":
     host = os.getenv("HOST", "0.0.0.0")
 
     # 开发环境配置
-    uvicorn.run("main:app", host=host, port=port, reload=True, log_level="info")
+    uvicorn.run("main:app", host=host, port=port, reload=True, log_level="info", reload_excludes=[".git", ".venv", ".idea"])

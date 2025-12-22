@@ -1,10 +1,11 @@
 from typing import List, Optional, Dict, Any
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
-from src.database.connection import get_db
+from maim_db.maimconfig_models.connection import get_db
 from src.common.logger import get_logger
 from maim_db.maimconfig_models.models import PluginSettings, Tenant, Agent
 

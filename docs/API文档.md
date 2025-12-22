@@ -93,7 +93,7 @@
   - body: `{ tenant_id?, agent_id?, user_id?, action, details?, timestamp? }`
   - 响应: `{ success: true, data: { ...recorded_entry } }`
 
-## 6. 插件配置（实验，/api/v1/plugins）
+## 7. 插件配置（/api/v1/plugins）
 - **GET /plugins/settings?tenant_id=...&agent_id?**
   - 读取插件配置；若带 agent_id，返回该 Agent 特定配置 + Tenant 默认配置的合并结果（Agent 优先）。
 - **POST /plugins/settings?tenant_id=...&agent_id?**
@@ -101,7 +101,7 @@
 
 说明：依赖 `maim_db.maimconfig_models.PluginSettings`（SQLAlchemy）。若 maim_db 未提供该模型或 `get_db` 无法返回 AsyncSession，则接口不可用。
 
-## 7. 运维接口
+## 8. 运维接口
 - **GET /** 服务自描述（版本、主要资源路径）
 - **GET /health** 健康检查
   - 响应: `{"status": "healthy", "services": {"database": "healthy", "api": "healthy"}, ...}`
