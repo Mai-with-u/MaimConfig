@@ -26,6 +26,7 @@ class TenantCreateRequest(BaseModel):
     description: Optional[str] = None
     contact_email: Optional[str] = None
     tenant_config: Optional[dict] = None
+    owner_id: Optional[str] = None
 
 
 class TenantUpdateRequest(BaseModel):
@@ -97,6 +98,7 @@ async def create_tenant(request: TenantCreateRequest):
             description=request.description,
             contact_email=request.contact_email,
             tenant_config=request.tenant_config,
+            owner_id=request.owner_id,
             status=TenantStatus.ACTIVE.value
         )
 

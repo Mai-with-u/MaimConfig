@@ -38,7 +38,11 @@ class ApiKeyPermissionRequest(BaseModel):
 
 
 async def parse_api_key(api_key: str) -> Optional[dict]:
-    """解析API密钥"""
+    """解析API密钥
+    
+    API Key格式（解码后）: tenant_{tenant_hash}_agent_{agent_hash}_{random_hash}_v{version}
+    例如: tenant_f42de8499dd7_agent_ff1678bfa633_54cb0fc31423_v1
+    """
     try:
         import base64
 
@@ -49,7 +53,24 @@ async def parse_api_key(api_key: str) -> Optional[dict]:
         decoded_data = base64.b64decode(encoded_key).decode()
         parts = decoded_data.split("_")
 
-        if len(parts) >= 4:
+        # 格式: tenant_{hash}_agent_{hash}_{random}_{version}
+        # parts: ["tenant", "f42de8499dd7", "agent", "ff1678bfa633", "54cb0fc31423", "v1"]
+        if len(parts) >= 6:
+            # 重建完整的 tenant_id 和 agent_id
+            tenant_id = f"{parts[0]}_{parts[1]}"  # "tenant_f42de8499dd7"
+            agent_id = f"{parts[2]}_{parts[3]}"   # "agent_ff1678bfa633"
+            random_hash = parts[4]
+            version = parts[5] if len(parts) > 5 else "v1"
+            
+            return {
+                "tenant_id": tenant_id,
+                "agent_id": agent_id,
+                "random_hash": random_hash,
+                "version": version,
+                "format_valid": True
+            }
+        elif len(parts) >= 4:
+            # 兼容旧格式（如果存在）
             return {
                 "tenant_id": parts[0],
                 "agent_id": parts[1],

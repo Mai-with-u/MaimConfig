@@ -26,7 +26,12 @@ async def create_tables() -> None:
             from maim_db.core import db_manager, ALL_MODELS
 
             db_manager.create_tables(ALL_MODELS)
-            print("✅ 数据库表初始化成功（使用maim_db，包含活跃状态表）")
+            print("✅ 数据库表初始化成功（Peewee/ALL_MODELS）")
+
+            # 同时也初始化 SQLAlchemy 模型 (如 PluginSettings)
+            from maim_db.maimconfig_models.models import create_tables as create_sa_tables
+            await create_sa_tables()
+            print("✅ 数据库表初始化成功（SQLAlchemy）")
         except Exception as inner_exc:
             print(f"⚠️ 表创建阶段出现问题: {inner_exc}")
             # 不中断主流程，便于已有数据库继续启动

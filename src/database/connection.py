@@ -268,6 +268,27 @@ class AsyncAgent:
 
         await asyncio.get_event_loop().run_in_executor(None, _delete)
 
+    async def update(self, **kwargs):
+        def _update():
+            for field, value in kwargs.items():
+                if hasattr(self._agent, field):
+                    if field == 'config' and value is not None:
+                        value = json.dumps(value)
+                    setattr(self._agent, field, value)
+            self._agent.save()
+            return self._agent
+
+        await asyncio.get_event_loop().run_in_executor(None, _update)
+
+        # Update local attributes
+        for field, value in kwargs.items():
+            if hasattr(self, field):
+                if field == 'config':
+                    value = self._parse_json(json.dumps(value)) if value else {}
+                setattr(self, field, value)
+
+        return self
+
 
 class AsyncApiKey:
     @classmethod

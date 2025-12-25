@@ -20,7 +20,9 @@ from src.api.routes import (
     auth_router,
     active_state_router,
     plugin_router,
+    plugin_router,
     usage_router,
+    system_router,
 )
 from src.database.connection import init_database, close_database
 from src.database.models import create_tables
@@ -94,6 +96,7 @@ def create_app() -> FastAPI:
     app.include_router(active_state_router, prefix="/api/v2", tags=["Agent活跃状态"])
     app.include_router(plugin_router, prefix="/api/v1", tags=["插件配置管理"])
     app.include_router(usage_router, prefix="/api/v1", tags=["使用日志"])
+    app.include_router(system_router, prefix="/api/v2", tags=["系统配置"])
 
     # 根路径
     @app.get("/")
@@ -174,4 +177,4 @@ if __name__ == "__main__":
     host = os.getenv("HOST", "0.0.0.0")
 
     # 开发环境配置
-    uvicorn.run("main:app", host=host, port=port, reload=True, log_level="info", reload_excludes=[".git", ".venv", ".idea"])
+    uvicorn.run("main:app", host=host, port=port, reload=True, log_level="info", reload_excludes=[".git", ".venv", ".idea", "*.log", "*.log.*", "__pycache__", "*.pyc"])

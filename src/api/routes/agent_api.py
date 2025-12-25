@@ -52,9 +52,47 @@ except ImportError:
 
 from src.utils.response import create_success_response, create_error_response
 from src.common.logger import get_logger
+from src.api.routes.system_api import load_system_models_from_toml, SYSTEM_DEFAULT_PROVIDERS
 
 logger = get_logger(__name__)
 router = APIRouter()
+
+def validate_model_config_security(config: Dict[str, Any]):
+    """
+    Validate that user configuration does not bypass system security controls.
+    Rule: Users cannot define custom models using System Providers.
+    """
+    if not config:
+        return
+
+    # Check config_overrides.model.models
+    overrides = config.get("config_overrides", {})
+    if not overrides:
+        return
+        
+    model_config = overrides.get("model", {})
+    user_models = model_config.get("models", [])
+    
+    if not user_models:
+        return
+
+    # Get System Providers
+    system_data = load_system_models_from_toml()
+    system_providers = set()
+    
+    if system_data and "providers" in system_data:
+        for p in system_data["providers"]:
+            system_providers.add(p["name"])
+    else:
+        # Fallback
+        for p in SYSTEM_DEFAULT_PROVIDERS:
+            system_providers.add(p["name"])
+
+    # Validate
+    for m in user_models:
+        provider = m.get("api_provider")
+        if provider in system_providers:
+            raise ValueError(f"Security Violation: Cannot use system provider '{provider}' for custom model '{m.get('name')}'. Please use system models directly.")
 
 
 class AgentCreateRequest(BaseModel):
@@ -115,7 +153,7 @@ def agent_to_response(
     config = None
     if config_manager:
         try:
-            config = config_manager.get_all_configs()
+            config = config_manager.get_all_configs(mask_secrets=True)
         except Exception as e:
             logger.error(f"获取Agent配置失败: {e}")
             config = None
@@ -174,6 +212,18 @@ async def create_agent(request: AgentCreateRequest):
                         request_id=request_id,
                     )
 
+        # 验证配置安全性
+        if request.config:
+            try:
+                validate_model_config_security(request.config)
+            except ValueError as e:
+                return create_error_response(
+                    message="配置验证失败",
+                    error=str(e),
+                    error_code="AGENT_011",
+                    request_id=request_id,
+                )
+
         # 创建Agent
         agent = await AsyncAgent.create(
             id=await generate_agent_id(),
@@ -195,6 +245,7 @@ async def create_agent(request: AgentCreateRequest):
 
         # 创建配置管理器并保存配置
         config_manager = AgentConfigManager(agent.id)
+        # Config already validated above
         if request.config:
             try:
                 config_manager.update_config_from_json(request.config)
@@ -353,7 +404,18 @@ async def update_agent(agent_id: str, request: AgentUpdateRequest):
             update_data["description"] = request.description
         if request.status is not None:
             update_data["status"] = request.status.value
+        
         if request.config is not None:
+            # 验证配置安全性
+            try:
+                validate_model_config_security(request.config)
+            except ValueError as e:
+                return create_error_response(
+                    message="配置验证失败",
+                    error=str(e),
+                    error_code="AGENT_011",
+                    request_id=request_id,
+                )
             update_data["config"] = request.config
 
         # 执行更新
@@ -457,7 +519,7 @@ async def get_agent_config(agent_id: str):
 
         # 获取完整配置
         config_manager = AgentConfigManager(agent_id)
-        config = config_manager.get_all_configs()
+        config = config_manager.get_all_configs(mask_secrets=True)
 
         return create_success_response(
             data=config,
@@ -494,6 +556,17 @@ async def update_agent_config(agent_id: str, config_data: Dict[str, Any]):
                 request_id=request_id,
             )
 
+        # 验证配置安全性
+        try:
+            validate_model_config_security(config_data)
+        except ValueError as e:
+            return create_error_response(
+                message="配置验证失败",
+                error=str(e),
+                error_code="AGENT_011",
+                request_id=request_id,
+            )
+
         # 更新配置
         config_manager = AgentConfigManager(agent_id)
         config_manager.update_config_from_json(config_data)
@@ -501,7 +574,7 @@ async def update_agent_config(agent_id: str, config_data: Dict[str, Any]):
         logger.info(f"更新Agent配置成功: {agent_id}")
 
         # 返回更新后的完整配置
-        updated_config = config_manager.get_all_configs()
+        updated_config = config_manager.get_all_configs(mask_secrets=True)
 
         return create_success_response(
             data=updated_config,
